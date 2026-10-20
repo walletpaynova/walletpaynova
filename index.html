@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PayNova Wallet - Banca Digital & Wallet</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Tesseract OCR para Cédulas -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- CSS Personalizado -->
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81' },
+                        darkbg: '#0b0f19',
+                        darkcard: '#111827',
+                        darkborder: '#1f2937'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-darkbg text-gray-100 min-h-screen transition-colors duration-300">
+
+    <!-- CONTENEDOR DE NOTIFICACIONES (TOAST) -->
+    <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-3 pointer-events-none"></div>
+
+    <!-- MODAL DE FACTURA / COMPROBANTE -->
+    <div id="invoiceModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white text-gray-900 rounded-3xl max-w-md w-full p-8 shadow-2xl space-y-6 relative font-sans text-xs">
+            <button type="button" id="closeInvoiceBtn" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <p class="text-[10px] text-gray-400 text-center">Esto no es un CFDI. Puedes descargar las facturas para fines impositivos <a href="#" class="text-indigo-600 underline">aquí</a>.</p>
+            
+            <div class="flex justify-between items-center border-b pb-4">
+                <div>
+                    <h1 class="text-3xl font-black text-indigo-600 tracking-tighter">PAYNOVA</h1>
+                    <p class="text-[10px] text-gray-500 mt-1">PayNova Ecuador S.A.<br>Guayaquil - Pedro Carbo, CP 091201<br>RUC: 0992384729001</p>
+                </div>
+            </div>
+
+            <div>
+                <p class="text-gray-500 font-mono text-[10px]" id="invReceiptNo">Recibo N.º 00000-00000-00000-00000</p>
+            </div>
+
+            <div class="space-y-2 border-t border-b py-4">
+                <div class="flex justify-between"><span class="text-gray-500">Fecha</span><span id="invDate" class="font-bold">--/--/--</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">Descripción</span><span id="invDesc" class="font-bold">--</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">Destino / Banco</span><span id="invDest" class="font-bold">--</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">Monto</span><span id="invAmount" class="font-bold">$0.00</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">IVA (0%)</span><span class="font-bold">$0.00</span></div>
+                <div class="flex justify-between text-sm font-extrabold text-indigo-900 border-t pt-2"><span class="uppercase">Total</span><span id="invTotal">$0.00</span></div>
+            </div>
+
+            <div class="flex justify-between items-center text-[10px] text-gray-500">
+                <span>Forma de pago: <strong class="text-gray-800">DÉBITO PAYNOVA</strong></span>
+                <span class="text-emerald-600 font-bold uppercase"><i class="fa-solid fa-circle-check mr-1"></i> Aceptado</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE CÁMARA BIOMÉTRICA -->
+    <div id="faceModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl relative">
+            <h3 class="text-lg font-bold text-white">Verificación Biométrica</h3>
+            <p class="text-xs text-gray-400">Otorgue permiso de la cámara. Círculo rojo escaneando, azul cuando esté quieto.</p>
+            
+            <div class="relative w-64 h-64 mx-auto rounded-full overflow-hidden border-4 border-slate-700 shadow-inner flex items-center justify-center bg-black">
+                <video id="faceVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
+                <div id="faceIndicatorRing" class="absolute inset-4 rounded-full border-4 border-red-500 pointer-events-none transition-colors duration-300"></div>
+            </div>
+
+            <p id="faceInstruction" class="text-xs font-semibold text-red-400">Otorgue permiso de la cámara...</p>
+            
+            <div id="facePreviewContainer" class="hidden space-y-3">
+                <p class="text-xs font-bold text-emerald-400">Verifique que su foto salió bien:</p>
+                <img id="faceCapturedImg" class="w-40 h-40 mx-auto rounded-full object-cover border-2 border-brand-500 shadow-md" alt="Captura">
+                <div class="flex gap-2">
+                    <button type="button" id="retakePhotoBtn" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs text-gray-300 rounded-xl font-semibold">Repetir</button>
+                    <button type="button" id="confirmPhotoBtn" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-xs text-white rounded-xl font-bold">Confirmar y Subir</button>
+                </div>
+            </div>
+            
+            <button type="button" id="closeFaceModalBtn" class="text-xs text-gray-500 hover:text-gray-300 underline mt-2">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE ESTADO DE VERIFICACIÓN EN TIEMPO REAL -->
+    <div id="verificationScreen" class="min-h-screen hidden flex items-center justify-center p-4 bg-darkbg">
+        <div class="w-full max-w-md bg-darkcard border border-darkborder rounded-3xl p-8 text-center space-y-6 shadow-2xl">
+            <div id="statusIconBox" class="w-20 h-20 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-3xl animate-pulse">
+                <i class="fa-solid fa-paper-plane"></i>
+            </div>
+            
+            <div>
+                <span id="statusBadge" class="px-3 py-1 bg-amber-500/20 text-amber-400 text-xs font-extrabold uppercase rounded-full tracking-widest">
+                    ENVIADO
+                </span>
+                <h2 id="statusTitle" class="text-2xl font-extrabold text-white mt-3">Revisando tu Solicitud</h2>
+                <p id="statusDesc" class="text-xs text-gray-400 mt-2">Tus datos y documentos han sido enviados. Esta pantalla se actualizará en tiempo real cuando sea <strong class="text-emerald-400">ACEPTADO</strong> o <strong class="text-rose-400">RECHAZADO</strong>.</p>
+            </div>
+
+            <div class="pt-4 border-t border-slate-800">
+                <button type="button" id="cancelVerificationBtn" class="px-4 py-2 bg-slate-800 text-gray-300 text-xs rounded-xl font-semibold hover:bg-slate-700">Cerrar Sesión</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA 1: AUTENTICACIÓN -->
+    <div id="authScreen" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+        <div class="w-full max-w-md relative z-10">
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-brand-600 to-fuchsia-600 shadow-lg shadow-brand-500/30 mb-3">
+                    <i class="fa-solid font-bold text-2xl text-white fa-wallet"></i>
+                </div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white">PAYNOVA WALLET</h1>
+                <p class="text-gray-400 text-sm mt-1">Banca Digital Moderna</p>
+            </div>
+
+            <div class="bg-darkcard/90 backdrop-blur-xl border border-darkborder rounded-3xl p-8 shadow-2xl">
+                <!-- Selector Login / Registro -->
+                <div class="flex p-1 bg-slate-900/80 rounded-xl mb-6 border border-slate-800">
+                    <button type="button" id="tabLoginBtn" class="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all bg-brand-600 text-white shadow-md">Iniciar Sesión</button>
+                    <button type="button" id="tabRegisterBtn" class="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-400 hover:text-white transition-all">Registrarse</button>
+                </div>
+
+                <!-- Formulario Login -->
+                <form id="loginForm" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre de Usuario o Email</label>
+                        <input type="text" id="loginEmail" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white focus:outline-none focus:border-brand-500" placeholder="Ingresa tu usuario">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
+                        <input type="password" id="loginPassword" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white focus:outline-none focus:border-brand-500" placeholder="••••••••">
+                    </div>
+                    <button type="submit" class="w-full py-3.5 px-4 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 text-white font-bold rounded-xl shadow-lg transition-all">
+                        Ingresar a mi Banca
+                    </button>
+                </form>
+
+                <!-- Formulario Registro por Pasos -->
+                <form id="registerForm" class="space-y-4 hidden">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">¿Qué deseas hacer?</label>
+                        <select id="regActionType" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                            <option value="crear">CREAR USUARIO</option>
+                            <option value="contratar">CONTRATAR UN PRODUCTO</option>
+                        </select>
+                    </div>
+
+                    <div id="crearUsuarioContainer" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tipo de Cuenta</label>
+                            <select id="regAccountAge" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                                <option value="menor">CUENTA MENOR DE EDAD (Límite $50)</option>
+                                <option value="mayor">CUENTA MAYOR DE EDAD</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="contratarProductoContainer" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Selecciona el Producto</label>
+                            <select id="regProductType" class="w-full bg-slate-900 border border-brand-500 rounded-xl py-3 px-4 text-sm text-white">
+                                <option value="ahorro">AHORRO</option>
+                                <option value="vender">VENDER</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- PASO 1 -->
+                    <div id="stepProductSelection" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre Completo</label>
+                            <input type="text" id="regFullName" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white" placeholder="Ej. Carlos Mendoza">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Cédula de Identidad</label>
+                            <input type="text" id="regCedula" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white" placeholder="Número de cédula">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Foto de la Cédula (Verificación OCR)</label>
+                            <input type="file" id="regCedulaFoto" accept="image/*" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 px-3 text-xs text-gray-400">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Verificación Biométrica</label>
+                            <button type="button" id="faceCaptureBtn" class="w-full py-3 bg-slate-800 text-xs text-brand-300 border border-slate-700 rounded-xl font-bold flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-camera"></i>
+                                <span id="faceStatusText">Escanear Rostro</span>
+                            </button>
+                        </div>
+
+                        <button type="button" id="nextToAccountStepBtn" class="w-full py-3.5 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl shadow-lg">
+                            Continuar a Crear Usuario
+                        </button>
+                    </div>
+
+                    <!-- PASO 2 -->
+                    <div id="stepUserCreation" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre de Usuario (Único)</label>
+                            <input type="text" id="regName" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white" placeholder="Ej. carlos2026">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
+                            <input type="password" id="regPassword" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white" placeholder="••••••••">
+                        </div>
+
+                        <div class="flex gap-2">
+                            <button type="button" id="backToProductStepBtn" class="w-1/3 py-3.5 bg-slate-800 text-gray-300 font-bold text-xs rounded-xl">Atrás</button>
+                            <button type="submit" class="w-2/3 py-3.5 bg-gradient-to-r from-fuchsia-600 to-brand-600 text-white font-bold rounded-xl shadow-lg">Finalizar y Enviar</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA 2: APLICACIÓN PRINCIPAL -->
+    <div id="mainApp" class="hidden min-h-screen flex flex-col md:flex-row">
+        <aside class="w-full md:w-64 bg-darkcard border-r border-darkborder flex flex-col justify-between z-20">
+            <div>
+                <div class="p-6 border-b border-darkborder flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-fuchsia-600 flex items-center justify-center text-white font-bold"><i class="fa-solid fa-wallet"></i></div>
+                    <div>
+                        <span class="font-extrabold text-white text-base">PAYNOVA</span>
+                        <span class="block text-[10px] text-brand-400 font-semibold uppercase">Banca Web</span>
+                    </div>
+                </div>
+
+                <nav class="p-4 space-y-1">
+                    <button type="button" data-nav="dashboard" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold bg-brand-600/20 text-brand-400 border border-brand-500/30">
+                        <i class="fa-solid fa-chart-pie w-5"></i><span>Dashboard</span>
+                    </button>
+                    <button type="button" data-nav="deposit" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-gray-400 hover:text-white">
+                        <i class="fa-solid fa-arrow-down-left-and-arrow-up-right-to-inside w-5 text-emerald-400"></i><span>Depositar</span>
+                    </button>
+                    <button type="button" data-nav="transfer" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-gray-400 hover:text-white">
+                        <i class="fa-solid fa-paper-plane w-5 text-indigo-400"></i><span>Transferir</span>
+                    </button>
+                    <button type="button" data-nav="withdraw" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-gray-400 hover:text-white">
+                        <i class="fa-solid fa-hand-holding-dollar w-5 text-amber-400"></i><span>Retirar</span>
+                    </button>
+                    <button type="button" data-nav="cards" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-gray-400 hover:text-white">
+                        <i class="fa-solid fa-credit-card w-5 text-fuchsia-400"></i><span>Tarjeta Débito</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="p-4 border-t border-darkborder">
+                <button type="button" id="logoutBtn" class="w-full flex items-center justify-center gap-2 py-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 text-xs font-bold rounded-xl border border-rose-500/20 transition-all">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Cerrar Sesión</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto bg-darkbg p-6 md:p-8 space-y-6">
+            <!-- DASHBOARD -->
+            <section id="view-dashboard" class="tab-content space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-3 bg-darkcard border border-darkborder rounded-3xl p-6 flex justify-between items-center">
+                        <div>
+                            <span class="text-xs font-semibold text-gray-400 uppercase">Saldo Total Disponible</span>
+                            <h2 id="balanceDisplay" class="text-4xl md:text-5xl font-extrabold text-white mt-2">$ 0.00 <span class="text-xs font-normal text-gray-400">USD</span></h2>
+                        </div>
+                        <button type="button" id="toggleBalanceBtn" class="px-4 py-2 bg-slate-800 text-xs text-gray-300 rounded-xl hover:bg-slate-700">
+                            <i id="eyeIcon" class="fa-regular fa-eye-slash mr-1"></i><span id="eyeText">Ocultar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HISTORIAL -->
+                <div class="bg-darkcard border border-darkborder rounded-3xl p-6">
+                    <h3 class="text-base font-bold text-gray-200 mb-4">Historial de Transacciones (Haz clic para ver Factura)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="text-[11px] text-gray-500 uppercase border-b border-slate-800">
+                                    <th class="py-3 px-4">Concepto / Tipo</th>
+                                    <th class="py-3 px-4">Fecha</th>
+                                    <th class="py-3 px-4">Destino</th>
+                                    <th class="py-3 px-4">Estado</th>
+                                    <th class="py-3 px-4 text-right">Monto</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactionTableBody" class="divide-y divide-slate-800/50 text-sm"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TARJETAS Y SEGURIDAD -->
+            <section id="view-cards" class="tab-content hidden max-w-4xl mx-auto space-y-6">
+                <div class="bg-darkcard border border-darkborder rounded-3xl p-6 md:p-8 space-y-6">
+                    <h3 class="text-lg font-bold">Gestión de Tarjeta de Débito PayNova</h3>
+                    
+                    <!-- Contenedor si NO tiene tarjeta creada -->
+                    <div id="noCardContainer" class="text-center py-8 space-y-4">
+                        <div class="w-16 h-16 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center mx-auto text-2xl">
+                            <i class="fa-solid fa-credit-card"></i>
+                        </div>
+                        <p class="text-xs text-gray-400">Aún no cuentas con una tarjeta de débito generada en tu cuenta.</p>
+                        <button type="button" id="createCardBtn" class="px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all">
+                            Crear Tarjeta de Débito
+                        </button>
+                    </div>
+
+                    <!-- Contenedor con la Tarjeta Generada (Oculto al inicio con logo personalizado PayNova) -->
+                    <div id="hasCardContainer" class="hidden space-y-6">
+                        <div id="virtualCardVisual" class="bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-900 border border-slate-700 rounded-2xl p-6 text-white shadow-xl relative space-y-4 max-w-md mx-auto">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] font-bold tracking-widest text-indigo-400 uppercase">PAYNOVA DÉBITO</span>
+                                <!-- Logo exclusivo PayNova en lugar de Visa -->
+                                <div class="px-3 py-1 bg-brand-600/30 border border-brand-500/50 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                    <i class="fa-solid fa-bolt text-brand-400 text-xs"></i>
+                                    <span class="font-black text-xs tracking-tighter text-white">PAYNOVA</span>
+                                </div>
+                            </div>
+                            <p id="cardNumberDisplay" class="font-mono text-lg tracking-widest font-extrabold">4532 •••• •••• ----</p>
+                            <div class="flex justify-between text-xs">
+                                <div><p class="text-[9px] text-gray-400 uppercase">Titular</p><p id="cardHolderDisplay" class="font-bold">--</p></div>
+                                <div><p class="text-[9px] text-gray-400 uppercase">Vence</p><p id="cardExpiryDisplay" class="font-bold font-mono">--/--</p></div>
+                                <div><p class="text-[9px] text-gray-400 uppercase">CVV</p><p id="cardCvvDisplay" class="font-bold font-mono">---</p></div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4 max-w-md mx-auto">
+                            <button type="button" id="toggleCardPowerBtn" class="flex-1 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold rounded-xl border border-amber-500/20">
+                                Apagar Tarjeta
+                            </button>
+                            <button type="button" id="cancelCardPermanentBtn" class="flex-1 py-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-bold rounded-xl border border-rose-500/20">
+                                Cancelar Permanente
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DEPOSITAR -->
+            <section id="view-deposit" class="tab-content hidden max-w-xl mx-auto space-y-6">
+                <div class="bg-darkcard border border-darkborder rounded-3xl p-6 md:p-8 space-y-6">
+                    <h3 class="text-lg font-bold">Depositar Fondos</h3>
+                    <form id="depositForm" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Banco Origen</label>
+                            <select id="depositBank" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                                <option value="Banco Guayaquil">Banco Guayaquil</option>
+                                <option value="Banco Pichincha">Banco Pichincha</option>
+                                <option value="Produbanco">Produbanco</option>
+                                <option value="Banco Bolivariano">Banco Bolivariano</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Foto del Comprobante</label>
+                            <input type="file" id="depositProofFoto" accept="image/*" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 px-3 text-xs text-gray-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Monto Exacto Depositado (USD)</label>
+                            <input type="number" id="depositAmount" step="0.01" required placeholder="0.00" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                            <p class="text-[10px] text-rose-400 mt-1 font-semibold">⚠️ OJO: Pon el monto exacto que depositaste o de lo contrario no se hará el pago y se te devolverá el dinero.</p>
+                        </div>
+                        <button type="submit" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg">Confirmar Depósito</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- TRANSFERIR -->
+            <section id="view-transfer" class="tab-content hidden max-w-xl mx-auto space-y-6">
+                <div class="bg-darkcard border border-darkborder rounded-3xl p-6 md:p-8 space-y-6">
+                    <h3 class="text-lg font-bold">Transferir Dinero</h3>
+                    <form id="transferForm" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Banco a Transferir</label>
+                            <select id="transferBank" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                                <option value="Banco Guayaquil">Banco Guayaquil</option>
+                                <option value="Banco Pichincha">Banco Pichincha</option>
+                                <option value="Produbanco">Produbanco</option>
+                                <option value="Banco Bolivariano">Banco Bolivariano</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Número de Cuenta</label>
+                            <input type="text" id="transferAccountNum" required placeholder="Número de cuenta destino" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Cédula de Identidad del Titular</label>
+                            <input type="text" id="transferCedula" required placeholder="Cédula del titular" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Monto (USD)</label>
+                            <input type="number" id="transferAmount" step="0.01" required placeholder="0.00" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Motivo</label>
+                            <input type="text" id="transferMotivo" required placeholder="Motivo de transferencia" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <button type="submit" class="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg">Realizar Transferencia</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- RETIRAR -->
+            <section id="view-withdraw" class="tab-content hidden max-w-xl mx-auto space-y-6">
+                <div class="bg-darkcard border border-darkborder rounded-3xl p-6 md:p-8 space-y-6">
+                    <h3 class="text-lg font-bold">Retirar Dinero a tu Banco</h3>
+                    <form id="withdrawForm" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Banco Destino</label>
+                            <select id="withdrawBank" required class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                                <option value="Banco Guayaquil">Banco Guayaquil</option>
+                                <option value="Banco Pichincha">Banco Pichincha</option>
+                                <option value="Produbanco">Produbanco</option>
+                                <option value="Banco Bolivariano">Banco Bolivariano</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Número de Cuenta</label>
+                            <input type="text" id="withdrawAccountNum" required placeholder="Tu número de cuenta" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Cédula de Identidad</label>
+                            <input type="text" id="withdrawCedula" required placeholder="Tu cédula" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Monto (USD)</label>
+                            <input type="number" id="withdrawAmount" step="0.01" required placeholder="0.00" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Motivo</label>
+                            <input type="text" id="withdrawMotivo" required placeholder="Motivo de retiro" class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-sm text-white">
+                        </div>
+                        <button type="submit" class="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-lg">Solicitar Retiro</button>
+                    </form>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Archivo JS vinculado como Módulo -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
